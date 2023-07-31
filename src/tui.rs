@@ -3,6 +3,10 @@
 use std::{io::{self, Write}, env::args, str::FromStr};
 pub use super::taskmanager::*;
 
+
+pub struct TaskList { }
+
+
 pub struct TUI {
     pub tm: TaskManager,
 }
