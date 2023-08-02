@@ -1,19 +1,33 @@
 #![allow(dead_code, unused_variables, unused_imports)]
 
-use std::{io::{self, Write}, env::args, str::FromStr};
+use std::{io::Write, str::FromStr};
+use crossterm;
+
 pub use super::taskmanager::*;
 
+struct CommandFailedError;
 
-pub struct TaskList { }
-
+enum Command {
+    Help,
+    List(SortBy),
+    Add(Priority, String),
+    Remove(u32),
+    Priority(u32, Priority),
+    Status(u32, Status),
+    Exit,
+}
 
 pub struct TUI {
     pub tm: TaskManager,
+    err_hist: Vec<String>,
+    cmd_hist: Vec<String>,
 }
 impl TUI {
     pub fn new() -> TUI {
         TUI {
-            tm: TaskManager::new()
+            tm: TaskManager::new(),
+            err_hist: Vec::new(),
+            cmd_hist: Vec::new(),
         }
     }
     fn display(&mut self) {
@@ -27,27 +41,50 @@ impl TUI {
             let mut input = String::from("");
 
             print!("> ");
-            io::stdout().flush().expect("Failed to flush stdout...");
+            std::io::stdout().flush().expect("Failed to flush stdout...");
 
-            io::stdin()
+            std::io::stdin()
                 .read_line(&mut input)
                 .expect("Failed to read input");
 
             println!("");
-            io::stdout().flush().expect("Failed to flush stdout...");
+            std::io::stdout().flush().expect("Failed to flush stdout...");
+
+            self.cmd_hist.push(input.to_owned());
 
             match self.process_input(&input) {
                 Ok(_) => { },
-                Err(e) => println!("[Error] {}", e),
+                Err(e) => {
+                    println!("[Error] {}", e);
+                    self.err_hist.push(e);
+                },
             };
         }
     }
 
+    fn execute_command(&mut self, cmd: Command) -> Result<(), CommandFailedError> {
+        match cmd {
+            Command::Help => { },
+            Command::List(sort_by) => { },
+            Command::Add(priority, title) => { },
+            Command::Remove(id) => { },
+            Command::Priority(id, priority) => { },
+            Command::Status(id, status) => { },
+            Command::Exit => { },
+        }
+
+        Ok(())
+    }
+
     fn process_input(&mut self, input: &str) -> Result<(), String> {
+        // separate input in command and arguments
         let mut binding = input.split(':');
         let cmd = binding.next().unwrap_or("");
 
         if let Some(arguments) = binding.next() {
+            // separate arguments by commas.
+            // for each command, retrieve the elements in the args iterator
+            // and parse them to pass arguments to the TaskManager functions
             let args_binding = arguments.split(',').collect::<Vec<&str>>();
             let mut args = args_binding.iter();
             match cmd {

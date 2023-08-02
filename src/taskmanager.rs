@@ -9,7 +9,6 @@ pub enum Priority {
     High,
 }
 
-#[derive(Debug, PartialEq, Eq)]
 pub struct ParsePriorityError;
 
 impl FromStr for Priority {
@@ -32,7 +31,6 @@ pub enum Status {
     Done,
 }
 
-#[derive(Debug, PartialEq, Eq)]
 pub struct ParseStatusError;
 
 impl FromStr for Status {
