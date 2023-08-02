@@ -5,6 +5,24 @@ use crossterm;
 
 pub use super::taskmanager::*;
 
+static HELP_MSG: &str =
+r#"
+Every command follows this syntax:
+the name of the command, a semicolon (always) and an optional list of arguments depending on the command.
+<command>:<arg1,arg2,...>
+
+List of commands:
+* help:
+* list:
+* add:<priority>,<title>
+* remove:<id>
+* description:<id>,<description>
+* priority:<id>,<new_priority>
+* status:<id>,<new_status>
+* exit:
+"#;
+
+#[derive(Debug)]
 struct CommandFailedError;
 
 enum Command {
@@ -15,10 +33,12 @@ enum Command {
     Priority(u32, Priority),
     Status(u32, Status),
     Exit,
+    None,
 }
 
 pub struct TUI {
     pub tm: TaskManager,
+    quit: bool,
     err_hist: Vec<String>,
     cmd_hist: Vec<String>,
 }
@@ -26,6 +46,7 @@ impl TUI {
     pub fn new() -> TUI {
         TUI {
             tm: TaskManager::new(),
+            quit: false,
             err_hist: Vec::new(),
             cmd_hist: Vec::new(),
         }
@@ -37,7 +58,7 @@ impl TUI {
     }
 
     pub fn run(&mut self) {
-        loop {
+        while !self.quit {
             let mut input = String::from("");
 
             print!("> ");
@@ -53,7 +74,12 @@ impl TUI {
             self.cmd_hist.push(input.to_owned());
 
             match self.process_input(&input) {
-                Ok(_) => { },
+                Ok(cmd) => {
+                    match self.execute_command(cmd) {
+                        Ok(_) => { },
+                        Err(_) => { println!("[!] command failed..."); },
+                    };
+                },
                 Err(e) => {
                     println!("[Error] {}", e);
                     self.err_hist.push(e);
@@ -64,19 +90,28 @@ impl TUI {
 
     fn execute_command(&mut self, cmd: Command) -> Result<(), CommandFailedError> {
         match cmd {
-            Command::Help => { },
-            Command::List(sort_by) => { },
-            Command::Add(priority, title) => { },
-            Command::Remove(id) => { },
-            Command::Priority(id, priority) => { },
-            Command::Status(id, status) => { },
-            Command::Exit => { },
-        }
+            Command::Help => { println!("{}", HELP_MSG) },
+            Command::List(sort_by) => { self.display() },
+            Command::Add(priority, title) => { self.tm.new_task(priority, &title) },
+            Command::Remove(id) => { self.tm.remove_task(TaskSelector::Id(id)) },
+            Command::Priority(id, priority) => {
+                self.tm
+                    .change_task_priority(TaskSelector::Id(id), priority)
+                    .ok().ok_or(CommandFailedError)?;
+            },
+            Command::Status(id, status) => {
+                self.tm
+                    .change_task_status(TaskSelector::Id(id), status)
+                    .ok().ok_or(CommandFailedError)?;
+            },
+            Command::Exit => { self.quit = true; },
+            Command::None => { },
+        };
 
         Ok(())
     }
 
-    fn process_input(&mut self, input: &str) -> Result<(), String> {
+    fn process_input(&mut self, input: &str) -> Result<Command, String> {
         // separate input in command and arguments
         let mut binding = input.split(':');
         let cmd = binding.next().unwrap_or("");
@@ -88,44 +123,26 @@ impl TUI {
             let args_binding = arguments.split(',').collect::<Vec<&str>>();
             let mut args = args_binding.iter();
             match cmd {
-                "help" => {
-                    println!(
-r#"
-Every command follows this syntax:
-the name of the command, a semicolon (always) and an optional list of arguments depending on the command.
-<command>:<arg1,arg2,...>
+                "help" => { return Ok(Command::Help); }
 
-List of commands:
-* help:
-* list:
-* add:<priority>,<title>
-* remove:<id>
-* description:<id>,<description>
-* priority:<id>,<new_priority>
-* status:<id>,<new_status>
-* exit:
-"#
-                        );
-                }
-                "list" => {
-                    self.display();
-                },
+                "list" => { return Ok(Command::List(SortBy::None)); },
+
                 "add" => {
-                    let priority: &str = &(*args.next().unwrap_or(&"low")).to_lowercase();
+                    let priority: Priority = match Priority::from_str(
+                            &(*args.next().unwrap_or(&"low")).to_lowercase())
+                    {
+                        Ok(p) => p,
+                        Err(e) => return Err(format!("invalid priority argument...")),
+                    };
                     let title: &str = args
                         .next()
                         .ok_or(format!("task title is missing..."))?
                         .strip_suffix('\n')
                         .ok_or(format!("could not parse task title..."))?;
 
-                    self.tm.new_task(
-                            match Priority::from_str(priority) {
-                                Ok(p) => p,
-                                Err(e) => return Err(format!("invalid priority argument...")),
-                            },
-                            title,
-                        );
+                    return Ok(Command::Add(priority, title.to_string()));
                 },
+
                 "remove" => {
                     let id = args
                             .next()
@@ -134,9 +151,11 @@ List of commands:
                             .ok_or(format!("could not read task id..."))?
                             .parse::<u32>()
                             .ok().ok_or(format!("could not parse task id..."))?;
-                    self.tm.remove_task(TaskSelector::Id(id));
+                    return Ok(Command::Remove(id));
                 },
-                "description" => { },           // <--------------
+
+                "description" => { return Ok(Command::None); },
+
                 "priority" => {
                     let id = args
                         .next()
@@ -152,10 +171,9 @@ List of commands:
                         Ok(p) => p,
                         Err(_) => return Err(format!("invalid priority argument...")),
                     };
-                    self.tm
-                        .change_task_priority(TaskSelector::Id(id), priority)
-                        .ok().ok_or(format!("could not find task with id '{}'", id))?;
+                    return Ok(Command::Priority(id, priority));
                 },
+
                 "status" => {
                     let id = args
                         .next()
@@ -171,20 +189,17 @@ List of commands:
                         Ok(s) => s,
                         Err(_) => return Err(format!("invalid status argument...")),
                     };
-                    self.tm
-                        .change_task_status(TaskSelector::Id(id), status)
-                        .ok().ok_or(format!("could not find task with id '{}'", id))?;
+                    return Ok(Command::Status(id, status));
                 },
-                "exit" => {
-                    // save tasks to file and exit
-                },
-                "" => { /* do nothing */ },
+
+                "exit" => { return Ok(Command::Exit); },
+
+                "" => { return Ok(Command::None); },
+
                 _ => return Err(format!("'{}' is not a valid command...", cmd)),
             }
         } else {
-            return Err(format!("command arguments are missing..."));
+            return Err(format!("invalid syntax..."));
         }
-
-        Ok(())
     }
 }

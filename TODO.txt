@@ -1,4 +1,4 @@
-[ ] move the execution of the commands to a different function, and keep in the process_input function
+[x] move the execution of the commands to a different function, and keep in the process_input function
 	just the processing, which should send to the execute_command function the processed commands as an enum like this:
 
 	enum Command {
@@ -9,6 +9,7 @@
 		Priority(u32, Priority),
 		Status(u32, Status),
 		Exit,
+		None,
 	}
 
 	* make process_input return a Command, which is then processed in result pattern matching
