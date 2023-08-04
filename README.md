@@ -40,10 +40,15 @@
         --> [add, "...", "...", medium]
     ```
 
-- [ ] code saving to a file at Command::Exit
-	- write tasklist to $HOME/.taskman
+- [x] code saving to a file at Command::Exit
 
-- [ ] design tui elements:
+- [ ] handle all results properly
+    - serialization/deserialization
+        - [ ] move the file from "<taskman_project_dir>/taskman.json" to "$HOME/taskman.json"
+    - distinguish CommandFailedError instances through a string
+    - all UI write!(...)? calls
+
+- [x] design tui elements:
 	- a Box should be a rectangle that contains formatted text (with wrapping and trimming).
 		- maybe a block has a fixed size but the border is displayed according to the number of lines of the text
 	- a Panel should contain positioned and sized Boxs.
@@ -84,30 +89,4 @@
     | help, list, add, remove, priority, status, exit                                       |<--- Prompt is for user input and contains the cursor
     | $ _                                                                                   |
     +---------------------------------------------------------------------------------------+
-    ```
-
-    ```rust
-    struct TUI {
-        // ...
-        panel: Panel,
-        prompt: Prompt,
-        err_msgs: Vec<String>,
-        cmd_hist: Vec<String>
-    }
-
-    struct Box {
-        position: [i32;2],
-        size: [i32;2],
-        name: String,
-        text: String,
-    }
-
-    struct Panel {
-        blocks: Vec<Box>,
-    }
-
-    struct Prompt {
-        text: String,
-        symbol: String,
-    }
     ```

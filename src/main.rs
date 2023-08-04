@@ -1,7 +1,7 @@
 mod taskmanager;
-mod tui;
+mod tasktui;
 
 fn main() {
-    let mut tui = tui::TUI::new();
+    let mut tui = tasktui::TUI::new();
     tui.run();
 }

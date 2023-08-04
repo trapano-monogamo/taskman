@@ -1,8 +1,14 @@
 #![allow(dead_code)]
 
-use std::{fmt::Display, str::FromStr};
+use std::{
+    fmt::Display,
+    str::FromStr,
+    fs::{File, OpenOptions}, io::{Write, Read},
+};
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+use serde::{Serialize, Deserialize};
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
     Low,
     Medium,
@@ -24,7 +30,7 @@ impl FromStr for Priority {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Status {
     ToDo,
     Doing,
@@ -47,6 +53,7 @@ impl FromStr for Status {
 }
 
 #[allow(dead_code)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Task {
     id: u32,
     title: String,
@@ -84,6 +91,8 @@ impl Task {
             status: Status::ToDo,
         }
     }
+
+    pub fn id(&self) -> u32 { self.id }
 }
 
 pub struct TaskFactory;
@@ -112,7 +121,33 @@ pub struct TaskManager {
 
 impl TaskManager {
     pub fn new() -> TaskManager {
-        TaskManager { tasks: Vec::new() }
+        match File::open("taskman.json") {
+            Ok(mut f) => {
+                let mut buffer = String::new();
+                f.read_to_string(&mut buffer).unwrap();
+                TaskManager {
+                    tasks: match serde_json::from_str(&buffer) {
+                        Ok(t) => { t },
+                        Err(_) => { Vec::new() },
+                    }
+                }
+            },
+            Err(_) => { TaskManager { tasks: Vec::new() } },
+        }
+    }
+
+    pub fn save(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let serialized_tasks = serde_json::to_string(&self.tasks)?;
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open("taskman.json")?;
+
+        file.write_all(serialized_tasks.as_bytes())?;
+
+        Ok(())
     }
 
     pub fn new_task(&mut self, priority: Priority, title: &str) {
@@ -183,6 +218,13 @@ impl TaskManager {
             return Err(TaskNotFountError);
         }
         Ok(())
+    }
+
+    pub fn filter_task_status(&self, status: Status) -> Vec<&Task> {
+        self.tasks
+            .iter()
+            .filter(|e| e.status == status)
+            .collect()
     }
 
     // format a list with all tasks ([Priority] title)

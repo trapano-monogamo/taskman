@@ -1,9 +1,13 @@
-#![allow(dead_code, unused_variables, unused_imports)]
+#![allow(dead_code, unused_variables)]
 
-use std::{io::Write, str::FromStr};
-use crossterm;
+use std::{
+    io::{self, Write},
+    str::FromStr
+};
+use super::taskmanager::*;
 
-pub use super::taskmanager::*;
+extern crate crossterm;
+use crossterm::terminal;
 
 static HELP_MSG: &str =
 r#"
@@ -24,6 +28,8 @@ List of commands:
 
 #[derive(Debug)]
 struct CommandFailedError;
+#[derive(Debug)]
+struct ParseCommandError;
 
 enum Command {
     Help,
@@ -36,41 +42,155 @@ enum Command {
     None,
 }
 
+impl FromStr for Command {
+    type Err = ParseCommandError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Command::None)
+    }
+}
+
+#[derive(Default, Clone)]
+struct Block {
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    title: String,
+    content: Vec<String>,
+}
+
+impl Block {
+    fn new(x: usize, y: usize, width: usize, height: usize, title: &str) -> Block {
+        Block { x, y, width, height, title: title.to_string(), content: Vec::new() }
+    }
+
+    fn draw<W: Write>(&self, handle: &mut W) -> Result<(), io::Error> {
+        // Move the cursor to the starting position
+        write!(handle, "\x1B[{};{}H", self.y, self.x)?;
+
+        // Draw the top border
+        let mut formatted_title = self.title.clone();
+        formatted_title.push_str("-".repeat(self.width - self.title.len() - 1).as_str());
+        write!(handle, "-{:<width$}", &formatted_title, width = self.width - 2)?;
+
+        for i in 1..self.height-1 {
+            let gap = self.width - 2;
+            write!(handle, "\x1B[{};{}H", self.y + i, self.x)?;
+            write!(
+                handle,
+                "|{:<width$}|",
+                match self.content.get(i-1) {
+                    Some(t) => {
+                        let mut res = t.clone().trim().to_string();
+                        res.truncate(self.width - 2);
+                        res
+                    },
+                    None => { String::from("") },
+                },
+                width = self.width - 2
+            )?;
+        }
+
+        // Draw the bottom border
+        write!(handle, "\x1B[{};{}H", self.y + self.height - 1, self.x)?;
+        for _ in 0..self.width { handle.write_all(b"-")?; }
+
+        Ok(())
+    }
+}
+
 pub struct TUI {
     pub tm: TaskManager,
     quit: bool,
     err_hist: Vec<String>,
     cmd_hist: Vec<String>,
+    blocks: Vec<Block>,
+    width: usize,
+    height: usize,
 }
 impl TUI {
     pub fn new() -> TUI {
+        let (cols, rows) = terminal::size().unwrap();
         TUI {
             tm: TaskManager::new(),
             quit: false,
             err_hist: Vec::new(),
             cmd_hist: Vec::new(),
+            blocks: vec![
+                Block::new(0,                   1,                     (cols*1/3-1) as usize, (rows*1/2) as usize, "ToDo"),
+                Block::new((cols*1/3) as usize, 1,                     (cols*1/3)   as usize, (rows*1/2) as usize, "Doing"),
+                Block::new((cols*2/3) as usize, 1,                     (cols*1/3)   as usize, (rows*1/2) as usize, "Done"),
+                Block::new(0,                   (rows*1/2+1) as usize, (cols*1/2-1) as usize, (rows*1/3) as usize, "Errors"),
+                Block::new((cols*1/2) as usize, (rows*1/2+1) as usize, (cols*1/2-1) as usize, (rows*1/3) as usize, "Commands"),
+            ],
+            width: cols as usize,
+            height: rows as usize,
         }
     }
+
     fn display(&mut self) {
         println!("~~~");
         self.tm.log_tasks(SortBy::None);
         println!("~~~");
     }
 
+    fn draw_ui<W: Write>(&self, handle: &mut W) -> Result<(), io::Error> {
+        // Clear the screen
+        // handle.write_all(b"\x1B[2J")?;
+        for y in 0..self.height {
+            write!(handle, "\x1B[{};{}H", y, 0)?;
+            write!(handle, "{:width$}", "", width = self.width)?;
+        }
+
+        // Move the cursor to the top-left corner
+        handle.write_all(b"\x1B[H")?;
+
+        for block in self.blocks.iter() {
+            block.draw(handle)?;
+        }
+
+        // Draw Prompt
+        handle.write_all(b"\n")?;
+        handle.write_all(b"> ")?;
+
+        handle.flush()?;
+
+        Ok(())
+    }
+
     pub fn run(&mut self) {
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+
         while !self.quit {
-            let mut input = String::from("");
+            let mut input = String::new();
 
-            print!("> ");
-            std::io::stdout().flush().expect("Failed to flush stdout...");
+            self.blocks[0].content = self.tm
+                .filter_task_status(Status::ToDo)
+                .iter()
+                .map(|e| format!("{}. {}", e.id(), e))
+                .collect();
+            self.blocks[1].content = self.tm
+                .filter_task_status(Status::Doing)
+                .iter()
+                .map(|e| format!("{}. {}", e.id(), e))
+                .collect();
+            self.blocks[2].content = self.tm
+                .filter_task_status(Status::Done)
+                .iter()
+                .map(|e| format!("{}. {}", e.id(), e))
+                .collect();
+            self.blocks[3].content = self.err_hist.clone();
+            self.blocks[4].content = self.cmd_hist.clone();
 
-            std::io::stdin()
-                .read_line(&mut input)
-                .expect("Failed to read input");
+            match self.draw_ui(&mut handle) {
+                Ok(_) => { },
+                Err(e) => { println!("{}", e); },
+            }
 
-            println!("");
-            std::io::stdout().flush().expect("Failed to flush stdout...");
-
+            // print!("> ");
+            std::io::stdin().read_line(&mut input).expect("couldn't read stdin");
             self.cmd_hist.push(input.to_owned());
 
             match self.process_input(&input) {
@@ -104,7 +224,10 @@ impl TUI {
                     .change_task_status(TaskSelector::Id(id), status)
                     .ok().ok_or(CommandFailedError)?;
             },
-            Command::Exit => { self.quit = true; },
+            Command::Exit => {
+                self.quit = true;
+                self.tm.save().unwrap();
+            },
             Command::None => { },
         };
 
@@ -115,6 +238,8 @@ impl TUI {
         // separate input in command and arguments
         let mut binding = input.split(':');
         let cmd = binding.next().unwrap_or("");
+
+        if cmd == "" { return Ok(Command::None); }
 
         if let Some(arguments) = binding.next() {
             // separate arguments by commas.
