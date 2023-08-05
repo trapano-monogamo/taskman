@@ -3,7 +3,9 @@
 use std::{
     fmt::Display,
     str::FromStr,
-    fs::{File, OpenOptions}, io::{Write, Read},
+    fs::OpenOptions,
+    io::{Write, Read},
+    path::Path,
 };
 
 use serde::{Serialize, Deserialize};
@@ -65,18 +67,14 @@ pub struct Task {
 impl Display for Task {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f,
-            "{} {} {}",
+            "{}. {} {}",
+            self.id,
             match self.priority {
                 Priority::Low => "[*  ]",
                 Priority::Medium => "[** ]",
                 Priority::High => "[***]",
             },
             self.title,
-            match self.status {
-                Status::ToDo => "(ToDo)",
-                Status::Doing => "(Doing)",
-                Status::Done => "(Done)",
-            },
         )
     }
 }
@@ -115,37 +113,47 @@ pub enum SortBy {
     None,
 }
 
-pub struct TaskManager {
+pub struct TaskManager<'a> {
     tasks: Vec<Task>, 
+    save_file: Box<&'a Path>,
 }
 
-impl TaskManager {
-    pub fn new() -> TaskManager {
-        match File::open("taskman.json") {
-            Ok(mut f) => {
-                let mut buffer = String::new();
-                f.read_to_string(&mut buffer).unwrap();
-                TaskManager {
-                    tasks: match serde_json::from_str(&buffer) {
-                        Ok(t) => { t },
-                        Err(_) => { Vec::new() },
-                    }
-                }
-            },
-            Err(_) => { TaskManager { tasks: Vec::new() } },
-        }
+impl<'a> TaskManager<'a> {
+    pub fn new(save_file: Box<&'a Path>) -> Result<TaskManager, String> {
+        let mut f = OpenOptions::new()
+            .write(true)
+            .read(true)
+            .create(true)
+            .open(*save_file)
+            .ok()
+            .ok_or(format!("could not open file '{}'...", save_file
+                           .to_str().unwrap_or("")))?;
+        let mut buffer = String::new();
+        f.read_to_string(&mut buffer)
+            .ok().ok_or(format!("could not read file to buffer..."))?;
+        drop(f);
+        Ok(TaskManager {
+            tasks: serde_json::from_str(&buffer)
+                .ok().ok_or(format!("couldn't deserialize file content..."))?,
+            save_file,
+        })
+    }
+
+    pub fn default(save_file: Box<&'a Path>) -> TaskManager {
+        TaskManager { tasks: Vec::new(), save_file }
     }
 
     pub fn save(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let serialized_tasks = serde_json::to_string(&self.tasks)?;
 
-        let mut file = OpenOptions::new()
+        let mut f = OpenOptions::new()
             .write(true)
-            .create(true)
             .truncate(true)
-            .open("taskman.json")?;
+            .open(*self.save_file)?;
 
-        file.write_all(serialized_tasks.as_bytes())?;
+        f.write_all(serialized_tasks.as_bytes())?;
+
+        drop(f);
 
         Ok(())
     }

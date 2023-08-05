@@ -2,6 +2,7 @@
 
 use std::{
     io::{self, Write},
+    path::Path,
     str::FromStr
 };
 use super::taskmanager::*;
@@ -27,7 +28,7 @@ List of commands:
 "#;
 
 #[derive(Debug)]
-struct CommandFailedError;
+struct CommandFailedError(String);
 #[derive(Debug)]
 struct ParseCommandError;
 
@@ -38,7 +39,8 @@ enum Command {
     Remove(u32),
     Priority(u32, Priority),
     Status(u32, Status),
-    Exit,
+    Save,
+    Quit,
     None,
 }
 
@@ -100,8 +102,8 @@ impl Block {
     }
 }
 
-pub struct TUI {
-    pub tm: TaskManager,
+pub struct TUI<'a> {
+    pub tm: TaskManager<'a>,
     quit: bool,
     err_hist: Vec<String>,
     cmd_hist: Vec<String>,
@@ -109,13 +111,20 @@ pub struct TUI {
     width: usize,
     height: usize,
 }
-impl TUI {
-    pub fn new() -> TUI {
+impl<'a> TUI<'a> {
+    pub fn new(save_file: Box<&'a Path>) -> TUI {
         let (cols, rows) = terminal::size().unwrap();
+        let mut err_hist = Vec::<String>::new();
         TUI {
-            tm: TaskManager::new(),
+            tm: match TaskManager::new(save_file.clone()) {
+                Ok(tm) => { tm },
+                Err(e) => {
+                    err_hist.push(e);
+                    TaskManager::default(save_file)
+                },
+            },
             quit: false,
-            err_hist: Vec::new(),
+            err_hist,
             cmd_hist: Vec::new(),
             blocks: vec![
                 Block::new(0,                   1,                     (cols*1/3-1) as usize, (rows*1/2) as usize, "ToDo"),
@@ -169,17 +178,17 @@ impl TUI {
             self.blocks[0].content = self.tm
                 .filter_task_status(Status::ToDo)
                 .iter()
-                .map(|e| format!("{}. {}", e.id(), e))
+                .map(|e| format!("{}", e))
                 .collect();
             self.blocks[1].content = self.tm
                 .filter_task_status(Status::Doing)
                 .iter()
-                .map(|e| format!("{}. {}", e.id(), e))
+                .map(|e| format!("{}", e))
                 .collect();
             self.blocks[2].content = self.tm
                 .filter_task_status(Status::Done)
                 .iter()
-                .map(|e| format!("{}. {}", e.id(), e))
+                .map(|e| format!("{}", e))
                 .collect();
             self.blocks[3].content = self.err_hist.clone();
             self.blocks[4].content = self.cmd_hist.clone();
@@ -189,7 +198,6 @@ impl TUI {
                 Err(e) => { println!("{}", e); },
             }
 
-            // print!("> ");
             std::io::stdin().read_line(&mut input).expect("couldn't read stdin");
             self.cmd_hist.push(input.to_owned());
 
@@ -197,18 +205,15 @@ impl TUI {
                 Ok(cmd) => {
                     match self.execute_command(cmd) {
                         Ok(_) => { },
-                        Err(_) => { println!("[!] command failed..."); },
+                        Err(e) => { self.err_hist.push(e) },
                     };
                 },
-                Err(e) => {
-                    println!("[Error] {}", e);
-                    self.err_hist.push(e);
-                },
+                Err(e) => { self.err_hist.push(e); },
             };
         }
     }
 
-    fn execute_command(&mut self, cmd: Command) -> Result<(), CommandFailedError> {
+    fn execute_command(&mut self, cmd: Command) -> Result<(), String> {
         match cmd {
             Command::Help => { println!("{}", HELP_MSG) },
             Command::List(sort_by) => { self.display() },
@@ -217,17 +222,20 @@ impl TUI {
             Command::Priority(id, priority) => {
                 self.tm
                     .change_task_priority(TaskSelector::Id(id), priority)
-                    .ok().ok_or(CommandFailedError)?;
+                    .ok().ok_or(format!("could not find task with id '{}'...", id))?;
             },
             Command::Status(id, status) => {
                 self.tm
                     .change_task_status(TaskSelector::Id(id), status)
-                    .ok().ok_or(CommandFailedError)?;
+                    .ok().ok_or(format!("could not find task with id '{}'...", id))?;
             },
-            Command::Exit => {
-                self.quit = true;
-                self.tm.save().unwrap();
+            Command::Save => {
+                match self.tm.save() {
+                    Ok(_) => { },
+                    Err(e) => { return Err(format!("{}", e)); },
+                };
             },
+            Command::Quit => { self.quit = true; },
             Command::None => { },
         };
 
@@ -317,7 +325,9 @@ impl TUI {
                     return Ok(Command::Status(id, status));
                 },
 
-                "exit" => { return Ok(Command::Exit); },
+                "save" => { return Ok(Command::Save); },
+
+                "quit" => { return Ok(Command::Quit); },
 
                 "" => { return Ok(Command::None); },
 

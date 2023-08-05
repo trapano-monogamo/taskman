@@ -42,11 +42,11 @@
 
 - [x] code saving to a file at Command::Exit
 
-- [ ] handle all results properly
-    - serialization/deserialization
-        - [ ] move the file from "<taskman_project_dir>/taskman.json" to "$HOME/taskman.json"
-    - distinguish CommandFailedError instances through a string
-    - all UI write!(...)? calls
+- [x] handle all results properly
+    - [x] save file
+    - [x] serialization/deserialization
+    - [x] distinguish CommandFailedError instances through a string
+    - [x] all UI write!(...)? calls
 
 - [x] design tui elements:
 	- a Box should be a rectangle that contains formatted text (with wrapping and trimming).
