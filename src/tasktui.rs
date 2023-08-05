@@ -199,6 +199,7 @@ impl<'a> TUI<'a> {
             }
 
             std::io::stdin().read_line(&mut input).expect("couldn't read stdin");
+            input = input.trim_end().to_owned();
             self.cmd_hist.push(input.to_owned());
 
             match self.process_input(&input) {
@@ -269,9 +270,7 @@ impl<'a> TUI<'a> {
                     };
                     let title: &str = args
                         .next()
-                        .ok_or(format!("task title is missing..."))?
-                        .strip_suffix('\n')
-                        .ok_or(format!("could not parse task title..."))?;
+                        .ok_or(format!("task title is missing..."))?;
 
                     return Ok(Command::Add(priority, title.to_string()));
                 },
@@ -280,8 +279,6 @@ impl<'a> TUI<'a> {
                     let id = args
                             .next()
                             .ok_or(format!("task id missing..."))?
-                            .strip_suffix('\n')
-                            .ok_or(format!("could not read task id..."))?
                             .parse::<u32>()
                             .ok().ok_or(format!("could not parse task id..."))?;
                     return Ok(Command::Remove(id));
@@ -297,9 +294,7 @@ impl<'a> TUI<'a> {
                         .ok().ok_or(format!("could not parse task id..."))?;
                     let priority = match Priority::from_str(args
                                                             .next()
-                                                            .ok_or(format!("priority argument is missing..."))?
-                                                            .strip_suffix('\n')
-                                                            .ok_or(format!("could not read priority argument..."))?)
+                                                            .ok_or(format!("priority argument is missing..."))?)
                     {
                         Ok(p) => p,
                         Err(_) => return Err(format!("invalid priority argument...")),
@@ -315,9 +310,7 @@ impl<'a> TUI<'a> {
                         .ok().ok_or(format!("could not parse task id..."))?;
                     let status = match Status::from_str(args
                                                         .next()
-                                                        .ok_or(format!("status argument is missing..."))?
-                                                        .strip_suffix('\n')
-                                                        .ok_or(format!("could not read status argument..."))?)
+                                                        .ok_or(format!("status argument is missing..."))?)
                     {
                         Ok(s) => s,
                         Err(_) => return Err(format!("invalid status argument...")),
