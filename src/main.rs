@@ -1,6 +1,8 @@
 mod taskmanager;
 mod tasktui;
 
+use tasktui::TUI;
+
 use std::{
     path::{Path, PathBuf},
     env,
@@ -20,7 +22,5 @@ fn main() {
         },
     };
                 
-    let mut tui = tasktui::TUI::new(Box::new(save_file));
-
-    tui.run();
+    TUI::new(Box::new(save_file)).run();
 }

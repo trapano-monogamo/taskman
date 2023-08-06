@@ -12,19 +12,17 @@ use crossterm::terminal;
 
 static HELP_MSG: &str =
 r#"
-Every command follows this syntax:
-the name of the command, a semicolon (always) and an optional list of arguments depending on the command.
-<command>:<arg1,arg2,...>
+<command> <arg1> <arg2> ...
 
 List of commands:
-* help:
-* list:
-* add:<priority>,<title>
-* remove:<id>
-* description:<id>,<description>
-* priority:<id>,<new_priority>
-* status:<id>,<new_status>
-* exit:
+* help
+* list
+* add "<title>" "<optional:description>" <optional:priority> <optional:status>
+* remove <id>
+* description <id> <description>
+* priority <id> <new_priority>
+* status <id> <new_status>
+* exit
 "#;
 
 #[derive(Debug)]
@@ -35,7 +33,7 @@ struct ParseCommandError;
 enum Command {
     Help,
     List(SortBy),
-    Add(Priority, String),
+    Add(String, String, Priority, Status),
     Remove(u32),
     Priority(u32, Priority),
     Status(u32, Status),
@@ -138,12 +136,6 @@ impl<'a> TUI<'a> {
         }
     }
 
-    fn display(&mut self) {
-        println!("~~~");
-        self.tm.log_tasks(SortBy::None);
-        println!("~~~");
-    }
-
     fn draw_ui<W: Write>(&self, handle: &mut W) -> Result<(), io::Error> {
         // Clear the screen
         // handle.write_all(b"\x1B[2J")?;
@@ -202,7 +194,7 @@ impl<'a> TUI<'a> {
             input = input.trim_end().to_owned();
             self.cmd_hist.push(input.to_owned());
 
-            match self.process_input(&input) {
+            match self.process_input_new(&input) {
                 Ok(cmd) => {
                     match self.execute_command(cmd) {
                         Ok(_) => { },
@@ -217,8 +209,8 @@ impl<'a> TUI<'a> {
     fn execute_command(&mut self, cmd: Command) -> Result<(), String> {
         match cmd {
             Command::Help => { println!("{}", HELP_MSG) },
-            Command::List(sort_by) => { self.display() },
-            Command::Add(priority, title) => { self.tm.new_task(priority, &title) },
+            Command::List(sort_by) => { },
+            Command::Add(title, description, priority, status) => { self.tm.new_task(&title, &description, priority, status) },
             Command::Remove(id) => { self.tm.remove_task(TaskSelector::Id(id)) },
             Command::Priority(id, priority) => {
                 self.tm
@@ -243,7 +235,122 @@ impl<'a> TUI<'a> {
         Ok(())
     }
 
-    fn process_input(&mut self, input: &str) -> Result<Command, String> {
+    fn process_input_new(&self, input: &str) -> Result<Command, String> {
+        // tokenize input
+        let mut tokens: Vec<String> = Vec::new();
+        let mut inside_quote = false;
+        let mut current_argument = String::new();
+
+        for input_slice in input.split_whitespace() {
+            if input_slice.starts_with('"') { inside_quote = true; }
+            if inside_quote {
+                // current_argument.push_str(" ");
+                // current_argument.push_str(input_slice);
+                current_argument = [current_argument, input_slice.to_string()].join(" ");
+            } else {
+                current_argument = input_slice.to_owned();
+            }
+            if input_slice.ends_with('"') { inside_quote = false; }
+            if !inside_quote {
+                tokens.push(current_argument.trim().to_owned());
+                current_argument.clear();
+            }
+        }
+
+        tokens.retain(|e| *e != "");
+
+        let mut tokens = tokens.iter();
+        match tokens.next() {
+            Some(cmd) => {
+                match cmd.as_str() {
+                    "help" => {
+                        if let Some(_) = tokens.next() {
+                            return Err(format!("Unexpected arguments for command '{}'...", cmd));
+                        } else { return Ok(Command::Help); }
+                    },
+                    "list" => {
+                        if let Some(_) = tokens.next() {
+                            return Err(format!("Unexpected arguments for command '{}'...", cmd));
+                        } else { return Ok(Command::List(SortBy::None)); }
+                    },
+                    "add" => {
+                        let title = tokens
+                            .next()
+                            .ok_or(format!("Missing <title> argument..."))?
+                            .trim_matches('"');
+                        let description = match tokens.next() {
+                            Some(s) => { s.trim_matches('"') },
+                            None => { "" },
+                        };
+                        let priority = match tokens.next() {
+                            Some(p) => {
+                                Priority::from_str(p)
+                                    .ok()
+                                    .ok_or(format!("Invalid priority argument..."))?
+                            },
+                            None => { Priority::default() },
+                        };
+                        let status = match tokens.next() {
+                            Some(s) => {
+                                Status::from_str(s)
+                                    .ok()
+                                    .ok_or(format!("Invalid status argument..."))?
+                            },
+                            None => { Status::default() },
+                        };
+
+                        return Ok(Command::Add((*title).to_owned(), (*description).to_owned(), priority, status));
+                    },
+                    "remove" => {
+                        let id = tokens
+                            .next()
+                            .ok_or(format!("Missing <task_id> argument..."))?
+                            .parse::<u32>()
+                            .ok().ok_or(format!("Invalid <task_id> argument..."))?;
+                        return Ok(Command::Remove(id));
+                    },
+                    "priority" => {
+                        let id = tokens
+                            .next()
+                            .ok_or(format!("Missing <task_id> argument..."))?
+                            .parse::<u32>()
+                            .ok().ok_or(format!("Invalid <task_id> argument..."))?;
+                        let priority = Priority::from_str(tokens
+                                .next()
+                                .ok_or(format!("Missing <new_priority> argument..."))?
+                            ).ok().ok_or(format!("Invalid <new_priority> argument..."))?;
+                        return Ok(Command::Priority(id, priority));
+                    },
+                    "status" => {
+                        let id = tokens
+                            .next()
+                            .ok_or(format!("Missing <task_id> argument..."))?
+                            .parse::<u32>()
+                            .ok().ok_or(format!("Invalid <task_id> argument..."))?;
+                        let status = Status::from_str(tokens
+                                .next()
+                                .ok_or(format!("Missing <new_status> argument..."))?
+                            ).ok().ok_or(format!("Invalid <new_status> argument..."))?;
+                        return Ok(Command::Status(id, status));
+                    },
+                    "save" => {
+                        if let Some(_) = tokens.next() {
+                            return Err(format!("Unexpected arguments for command '{}'...", cmd));
+                        } else { return Ok(Command::Save); }
+                    },
+                    "quit" => {
+                        if let Some(_) = tokens.next() {
+                            return Err(format!("Unexpected arguments for command '{}'...", cmd));
+                        } else { return Ok(Command::Quit); }
+                    },
+                    _ => { return Err(format!("Invalid command '{}'...", cmd)); },
+                }
+            },
+            None => { return Ok(Command::None); },
+        };
+    }
+
+    fn process_input(&self, input: &str) -> Result<Command, String> {
         // separate input in command and arguments
         let mut binding = input.split(':');
         let cmd = binding.next().unwrap_or("");
@@ -272,7 +379,8 @@ impl<'a> TUI<'a> {
                         .next()
                         .ok_or(format!("task title is missing..."))?;
 
-                    return Ok(Command::Add(priority, title.to_string()));
+                    // return Ok(Command::Add(priority, title.to_string()));
+                    return Ok(Command::None);
                 },
 
                 "remove" => {

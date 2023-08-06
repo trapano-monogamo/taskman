@@ -10,11 +10,19 @@ use std::{
 
 use serde::{Serialize, Deserialize};
 
+
+
+// ..:: Priority ::..
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
     Low,
     Medium,
     High,
+}
+
+impl Default for Priority {
+    fn default() -> Self { Priority::Low }
 }
 
 pub struct ParsePriorityError;
@@ -32,11 +40,19 @@ impl FromStr for Priority {
     }
 }
 
+
+
+// ..:: Status ::..
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Status {
     ToDo,
     Doing,
     Done,
+}
+
+impl Default for Status {
+    fn default() -> Self { Status::ToDo }
 }
 
 pub struct ParseStatusError;
@@ -53,6 +69,10 @@ impl FromStr for Status {
         }
     }
 }
+
+
+
+// ..:: Task ::..
 
 #[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,22 +100,20 @@ impl Display for Task {
 }
 
 impl Task {
-    pub fn new(id: u32, priority: Priority, title: &str, description: &str) -> Task {
+    pub fn new(id: u32, title: &str, description: &str, priority: Priority, status: Status) -> Task {
         Task {
             id,
             title: title.to_owned(),
             description: description.to_owned(),
             priority,
-            status: Status::ToDo,
+            status,
         }
     }
 
     pub fn id(&self) -> u32 { self.id }
 }
 
-pub struct TaskFactory;
-impl TaskFactory {
-}
+
 
 pub enum TaskSelector {
     Title(&'static str),
@@ -105,6 +123,8 @@ pub enum TaskSelector {
 #[derive(Debug, PartialEq, Eq)]
 pub struct TaskNotFountError;
 
+
+
 pub enum SortBy {
     Priority,
     Title,
@@ -112,6 +132,10 @@ pub enum SortBy {
     Status,
     None,
 }
+
+
+
+// ..:: TaskManager ::..
 
 pub struct TaskManager<'a> {
     tasks: Vec<Task>, 
@@ -158,9 +182,9 @@ impl<'a> TaskManager<'a> {
         Ok(())
     }
 
-    pub fn new_task(&mut self, priority: Priority, title: &str) {
+    pub fn new_task(&mut self, title: &str, description: &str, priority: Priority, status: Status) {
         self.tasks.push(
-            Task::new(self.tasks.len() as u32, priority, title, "")
+            Task::new(self.tasks.len() as u32, title, description, priority, status)
         );
     }
 
@@ -235,8 +259,7 @@ impl<'a> TaskManager<'a> {
             .collect()
     }
 
-    // format a list with all tasks ([Priority] title)
-    pub fn log_tasks(&mut self, sort_by: SortBy) {
+    pub fn log_tasks<W: Write>(&mut self, handle: &mut W, sort_by: SortBy) {
         match sort_by {
             SortBy::Id => self.tasks.sort_by_key(|e| e.id),
             SortBy::Title => self.tasks.sort_by_key(|e| e.title.chars().nth(0)),
@@ -245,20 +268,7 @@ impl<'a> TaskManager<'a> {
             SortBy::None => {},
         };
         for t in self.tasks.iter() {
-            println!("{}. {}", t.id, t);
+            write!(handle, "{}. {}", t.id, t);
         }
     }
-
-    // format a single task fully ([Priority] title \n description)
-    // pub fn show_task(&mut self, task_selector: TaskSelector) -> String {
-    //     let task: Option<&mut Task> = match task_selector {
-    //         TaskSelector::Title(title) => self.get_task_by_title(title),
-    //         TaskSelector::Id(id) => self.get_task_by_id(id),
-    //     };
-    //     if let Some(t) = task {
-    //         return format!("{}. {}\n{}\n", t.id, t, t.description);
-    //     } else {
-    //         return String::from("");
-    //     }
-    // }
 }
