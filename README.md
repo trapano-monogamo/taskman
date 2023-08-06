@@ -21,7 +21,7 @@
     }
     ```
 
-- [ ] refactor the input processing to make commands easier.
+- [x] refactor the input processing to make commands easier.
 	
     ```
     $ add <title> [description] [priority]

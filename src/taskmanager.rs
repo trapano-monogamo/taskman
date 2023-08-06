@@ -268,7 +268,7 @@ impl<'a> TaskManager<'a> {
             SortBy::None => {},
         };
         for t in self.tasks.iter() {
-            write!(handle, "{}. {}", t.id, t);
+            write!(handle, "{}. {}", t.id, t).unwrap();
         }
     }
 }
