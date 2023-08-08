@@ -111,6 +111,10 @@ impl Task {
     }
 
     pub fn id(&self) -> u32 { self.id }
+
+    pub fn log(&self) -> String {
+        format!("{}\n{}", self, self.description)
+    }
 }
 
 

@@ -1,5 +1,6 @@
 mod taskmanager;
 mod tasktui;
+mod queue;
 
 use tasktui::TUI;
 

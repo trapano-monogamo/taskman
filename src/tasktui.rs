@@ -6,6 +6,7 @@ use std::{
     str::FromStr
 };
 use super::taskmanager::*;
+use super::queue::Queue;
 
 extern crate crossterm;
 use crossterm::terminal;
@@ -32,8 +33,9 @@ struct ParseCommandError;
 
 enum Command {
     Help,
-    List(SortBy),
+    Show(u32),
     Add(String, String, Priority, Status),
+    Description(u32, String),
     Remove(u32),
     Priority(u32, Priority),
     Status(u32, Status),
@@ -103,8 +105,9 @@ impl Block {
 pub struct TUI<'a> {
     pub tm: TaskManager<'a>,
     quit: bool,
-    err_hist: Vec<String>,
-    cmd_hist: Vec<String>,
+    err_hist: Queue<String>,
+    cmd_hist: Queue<String>,
+    log_buf: Vec<String>,
     blocks: Vec<Block>,
     width: usize,
     height: usize,
@@ -112,7 +115,8 @@ pub struct TUI<'a> {
 impl<'a> TUI<'a> {
     pub fn new(save_file: Box<&'a Path>) -> TUI {
         let (cols, rows) = terminal::size().unwrap();
-        let mut err_hist = Vec::<String>::new();
+        let queue_cap = (rows*1/6) as usize - 2;
+        let mut err_hist = Queue::<String>::new(queue_cap);
         TUI {
             tm: match TaskManager::new(save_file.clone()) {
                 Ok(tm) => { tm },
@@ -123,13 +127,15 @@ impl<'a> TUI<'a> {
             },
             quit: false,
             err_hist,
-            cmd_hist: Vec::new(),
+            cmd_hist: Queue::new(queue_cap),
+            log_buf: Vec::new(),
             blocks: vec![
-                Block::new(0,                   1,                     (cols*1/3-1) as usize, (rows*1/2) as usize, "ToDo"),
-                Block::new((cols*1/3) as usize, 1,                     (cols*1/3)   as usize, (rows*1/2) as usize, "Doing"),
-                Block::new((cols*2/3) as usize, 1,                     (cols*1/3)   as usize, (rows*1/2) as usize, "Done"),
-                Block::new(0,                   (rows*1/2+1) as usize, (cols*1/2-1) as usize, (rows*1/3) as usize, "Errors"),
-                Block::new((cols*1/2) as usize, (rows*1/2+1) as usize, (cols*1/2-1) as usize, (rows*1/3) as usize, "Commands"),
+                Block::new(0,                   1,                     (cols*1/3-1) as usize, (rows*1/2)   as usize, "ToDo"),
+                Block::new((cols*1/3) as usize, 1,                     (cols*1/3)   as usize, (rows*1/2)   as usize, "Doing"),
+                Block::new((cols*2/3) as usize, 1,                     (cols*1/3)   as usize, (rows*1/2)   as usize, "Done"),
+                Block::new(0,                   (rows*1/2+1) as usize, (cols*1/2-1) as usize, (rows*1/6)   as usize, "Errors"),
+                Block::new((cols*1/2) as usize, (rows*1/2+1) as usize, (cols*1/2-1) as usize, (rows*1/6)   as usize, "Commands"),
+                Block::new(0,                   (rows*2/3)   as usize, (cols)       as usize, (rows*1/3-1) as usize, "Show"),
             ],
             width: cols as usize,
             height: rows as usize,
@@ -182,8 +188,9 @@ impl<'a> TUI<'a> {
                 .iter()
                 .map(|e| format!("{}", e))
                 .collect();
-            self.blocks[3].content = self.err_hist.clone();
-            self.blocks[4].content = self.cmd_hist.clone();
+            self.blocks[3].content = self.err_hist.clone_elements();
+            self.blocks[4].content = self.cmd_hist.clone_elements();
+            self.blocks[5].content = self.log_buf.clone();
 
             match self.draw_ui(&mut handle) {
                 Ok(_) => { },
@@ -194,7 +201,7 @@ impl<'a> TUI<'a> {
             input = input.trim_end().to_owned();
             self.cmd_hist.push(input.to_owned());
 
-            match self.process_input_new(&input) {
+            match self.process_input(&input) {
                 Ok(cmd) => {
                     match self.execute_command(cmd) {
                         Ok(_) => { },
@@ -209,8 +216,38 @@ impl<'a> TUI<'a> {
     fn execute_command(&mut self, cmd: Command) -> Result<(), String> {
         match cmd {
             Command::Help => { println!("{}", HELP_MSG) },
-            Command::List(sort_by) => { },
+            Command::Show(id) => {
+                let task = self.tm
+                    .get_task_by_id(id)
+                    .ok_or(format!("could not find task with id '{}'...", id))?;
+                let mut buffer = format!("{}", task.log());
+                let mut ccount = 0;
+                let mut indices = Vec::<usize>::new();
+                let mut i = 0;
+                for c in buffer.chars() {
+                    if c == '\n' {
+                        ccount = 0;
+                    } else { ccount += 1; }
+                    if ccount >= self.blocks
+                        .last()
+                        .ok_or(format!("couldn't find 'Log' ui block..."))?
+                        .width - 2
+                    {
+                        indices.push(i);
+                    }
+                    i += 1;
+                }
+                for j in indices {
+                    buffer.insert(j, '\n');
+                }
+                self.log_buf = buffer
+                    .split('\n')
+                    .map(|e| e.to_string())
+                    .filter(|e| *e != "".to_string())
+                    .collect();
+            },
             Command::Add(title, description, priority, status) => { self.tm.new_task(&title, &description, priority, status) },
+            Command::Description(id, description) => { }
             Command::Remove(id) => { self.tm.remove_task(TaskSelector::Id(id)) },
             Command::Priority(id, priority) => {
                 self.tm
@@ -235,7 +272,7 @@ impl<'a> TUI<'a> {
         Ok(())
     }
 
-    fn process_input_new(&self, input: &str) -> Result<Command, String> {
+    fn process_input(&self, input: &str) -> Result<Command, String> {
         // tokenize input
         let mut tokens: Vec<String> = Vec::new();
         let mut inside_quote = false;
@@ -268,10 +305,13 @@ impl<'a> TUI<'a> {
                             return Err(format!("Unexpected arguments for command '{}'...", cmd));
                         } else { return Ok(Command::Help); }
                     },
-                    "list" => {
-                        if let Some(_) = tokens.next() {
-                            return Err(format!("Unexpected arguments for command '{}'...", cmd));
-                        } else { return Ok(Command::List(SortBy::None)); }
+                    "show" => {
+                        let id = tokens
+                            .next()
+                            .ok_or(format!("Missing <task_id> argument..."))?
+                            .parse::<u32>()
+                            .ok().ok_or(format!("Invalid <task_id> argument..."))?;
+                        return Ok(Command::Show(id));
                     },
                     "add" => {
                         let title = tokens
@@ -301,6 +341,7 @@ impl<'a> TUI<'a> {
 
                         return Ok(Command::Add((*title).to_owned(), (*description).to_owned(), priority, status));
                     },
+                    "description" => { return Err(format!("Command 'description' not implemented yet...")); },
                     "remove" => {
                         let id = tokens
                             .next()
@@ -348,94 +389,5 @@ impl<'a> TUI<'a> {
             },
             None => { return Ok(Command::None); },
         };
-    }
-
-    fn process_input(&self, input: &str) -> Result<Command, String> {
-        // separate input in command and arguments
-        let mut binding = input.split(':');
-        let cmd = binding.next().unwrap_or("");
-
-        if cmd == "" { return Ok(Command::None); }
-
-        if let Some(arguments) = binding.next() {
-            // separate arguments by commas.
-            // for each command, retrieve the elements in the args iterator
-            // and parse them to pass arguments to the TaskManager functions
-            let args_binding = arguments.split(',').collect::<Vec<&str>>();
-            let mut args = args_binding.iter();
-            match cmd {
-                "help" => { return Ok(Command::Help); }
-
-                "list" => { return Ok(Command::List(SortBy::None)); },
-
-                "add" => {
-                    let priority: Priority = match Priority::from_str(
-                            &(*args.next().unwrap_or(&"low")).to_lowercase())
-                    {
-                        Ok(p) => p,
-                        Err(e) => return Err(format!("invalid priority argument...")),
-                    };
-                    let title: &str = args
-                        .next()
-                        .ok_or(format!("task title is missing..."))?;
-
-                    // return Ok(Command::Add(priority, title.to_string()));
-                    return Ok(Command::None);
-                },
-
-                "remove" => {
-                    let id = args
-                            .next()
-                            .ok_or(format!("task id missing..."))?
-                            .parse::<u32>()
-                            .ok().ok_or(format!("could not parse task id..."))?;
-                    return Ok(Command::Remove(id));
-                },
-
-                "description" => { return Ok(Command::None); },
-
-                "priority" => {
-                    let id = args
-                        .next()
-                        .ok_or(format!("task id is missing..."))?
-                        .parse::<u32>()
-                        .ok().ok_or(format!("could not parse task id..."))?;
-                    let priority = match Priority::from_str(args
-                                                            .next()
-                                                            .ok_or(format!("priority argument is missing..."))?)
-                    {
-                        Ok(p) => p,
-                        Err(_) => return Err(format!("invalid priority argument...")),
-                    };
-                    return Ok(Command::Priority(id, priority));
-                },
-
-                "status" => {
-                    let id = args
-                        .next()
-                        .ok_or(format!("task id is missing..."))?
-                        .parse::<u32>()
-                        .ok().ok_or(format!("could not parse task id..."))?;
-                    let status = match Status::from_str(args
-                                                        .next()
-                                                        .ok_or(format!("status argument is missing..."))?)
-                    {
-                        Ok(s) => s,
-                        Err(_) => return Err(format!("invalid status argument...")),
-                    };
-                    return Ok(Command::Status(id, status));
-                },
-
-                "save" => { return Ok(Command::Save); },
-
-                "quit" => { return Ok(Command::Quit); },
-
-                "" => { return Ok(Command::None); },
-
-                _ => return Err(format!("'{}' is not a valid command...", cmd)),
-            }
-        } else {
-            return Err(format!("invalid syntax..."));
-        }
     }
 }
